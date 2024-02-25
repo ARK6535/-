@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>手がかり画像一括作成くんv2</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.5.0/jszip.min.js"></script>
+    <style>
+#controlContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+.controlGroup {
+    margin-bottom: 1rem;
+}
+
+#imageContainer {
+    overflow-x: auto;
+    white-space: nowrap;
+    margin-top: 1rem;
+}
+.previewImage {
+    width: 400px;
+    height: auto;
+    display: inline;
+    margin-right: 10px;
+}
+#warningContainer {
+    color: red;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #f9e0e0;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+}
+    </style>
+</head>
+<body>
+    <h1>手がかり画像一括作成くんv2</h1>
+    <div id="controlContainer">
+        <div class="controlGroup">
+            <label for="imageInput">背景画像をアップロード(1200×675)</label>
+            <input type="file" id="imageInput" accept="image/*" onchange="uploadImage()">
+        </div>
+    
+        <div class="controlGroup">
+            <label for="fontInput">フォントファイルをアップロード</label>
+            <input type="file" id="fontInput" accept=".ttc,.ttf,.otf,.woff,.woff2" onchange="loadFont()">
+        </div>
+    
+        <div class="controlGroup">
+            <label for="imageText">画像に入れる文字を入力 (CSV形式):</label>
+            <textarea id="imageText" rows="4" cols="50" oninput="updateImages()">カンマで,改行
+改行で,次の画像</textarea>
+        </div>
+        <div class="controlGroup">
+            <label for="fontColor">文字色:</label>
+            <input type="color" id="fontColor" value="#000000" onchange="updateImages()">
+        </div>
+        <div class="controlGroup">
+            <label for="charsPerLine">一行あたりの文字数（デフォルトは5）:</label>
+            <input type="number" id="charsPerLine" value="5" min="1" oninput="updateImages()">
+        </div>
+        <div class="controlGroup">
+            <button onclick="downloadImages()">画像をzip形式でダウンロードする</button>
+            <span id="downloadStatus"></span>
+        </div>
+    </div>
+    <div id="warningContainer" style="display: none;">
+        <span id="warningMessage">証拠カードのサムネイルが不自然になる画像が含まれる可能性があります。</span>
+        <button id="reduceButton" onclick="reduceFontSize()">フォントサイズを調整する</button>
+    </div>
+
+    <h2>生成画像プレビュー</h2>
+    <div id="imageContainer">
+        <img id="uploadedImage" class="previewImage" alt="Uploaded Image">
+    </div>
+
+    <script>
+        let uploadedImage = createDefaultCanvas();
+        let customFont = 'Yu Gothic'; // デフォルトフォント
+        updateImages();
+        //画像をアップロードする
+        async function uploadImage() {
+            const input = document.getElementById('imageInput');
+            const file = input.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const image = new Image();
+                    image.src = e.target.result;
+                    image.onload = function() {
+                        uploadedImage = image;
+                        document.getElementById('imageInput').src = image.src;
+                        updateImages();
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+        //現在のパラメータに応じて画像を更新する。この際、文字数か行数が多すぎる場合は警告を表示する
+        function updateImages() {
+            if (!uploadedImage) return;
+            let isTextTooMuch = false;
+            const imageText = document.getElementById('imageText').value;
+            const lines = imageText.split('\n');
+            const charsPerLine = document.getElementById('charsPerLine').value || 5;
+            const fontSize = 675 / charsPerLine;
+            
+            for (const line of lines) {
+                const fields = line.split(',');
+                const maxFieldLength = Math.max(...fields.map(field => field.length)); // 画像内の行で最長の長さ
+                const fieldCount = fields.length; // 行数
+                if (fontSize * maxFieldLength > 675) {
+                    isTextTooMuch = true;
+                    break;
+                }
+                if (fontSize * fieldCount > 675) {
+                    isTextTooMuch = true;
+                    break;
+                }
+            }
+
+            if (isTextTooMuch) {
+                document.getElementById('warningContainer').style.display = 'block';
+            } else {
+                document.getElementById('warningContainer').style.display = 'none';
+            }
+
+            const oldCanvases = document.querySelectorAll('.previewImage');
+            oldCanvases.forEach(canvas => canvas.remove());
+
+            for (let i = 0; i < lines.length; i++) {
+                const canvas = document.createElement('canvas');
+                canvas.id = `canvas${i}`;
+                canvas.className = 'previewImage';
+                imageContainer.appendChild(canvas);
+                drawText(uploadedImage, canvas.id, lines[i], fontSize); 
+            }
+        }
+
+        // デフォルトの背景画像
+        function createDefaultCanvas() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1200;
+            canvas.height = 675;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            return canvas;
+        }
+        //  文字数と行数に応じて一行あたりの文字数を変更し、画像を更新する
+        function reduceFontSize() {
+            let maxFieldLength = 0;
+            let maxFieldCount = 0;
+            const lines = document.getElementById('imageText').value.split('\n');
+            for (const line of lines) {
+                const fields = line.split(',');
+                const currentMaxFieldLength = Math.max(...fields.map(field => field.length)); 
+                const currentFieldCount = fields.length; 
+
+                maxFieldLength = Math.max(maxFieldLength, currentMaxFieldLength);
+                maxFieldCount = Math.max(maxFieldCount, currentFieldCount);
+            }
+            const charsPerLine = Math.max(maxFieldLength, maxFieldCount);
+            document.getElementById('charsPerLine').value = charsPerLine;
+            updateImages();
+        }
+        // 画像に文字を描画する
+        function drawText(image, canvasId, csvLine, fontSize) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            canvas.width = 1200; 
+            canvas.height = 675; 
+            ctx.drawImage(image, 0, 0, 1200, 675); 
+
+            const texts = csvLine.split(',');
+
+            const fontColor = document.getElementById('fontColor').value;
+            ctx.font = `${fontSize}px ${customFont}`; 
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = fontColor;
+
+            const totalTextHeight = texts.length * fontSize; 
+            const startY = (canvas.height - totalTextHeight) / 2 + fontSize / 2; 
+            for (let i = 0; i < texts.length; i++) {
+                const y = startY + i * fontSize;
+                ctx.fillText(texts[i], canvas.width / 2, y);
+            }
+        }
+        // 画像をzip形式でダウンロードする
+        async function downloadImages() {
+            document.getElementById('downloadStatus').textContent = 'ダウンロード中です...';
+            const zip = new JSZip();
+            const previewImages = document.querySelectorAll('.previewImage');
+
+            await Promise.all(Array.from(previewImages).map(async (imgElement, index) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');    
+                const imageText = document.getElementById('imageText').value;
+                const lines = imageText.split('\n');
+                canvas.width = imgElement.width;
+                canvas.height = imgElement.height;
+                ctx.drawImage(imgElement, 0, 0);
+
+                const clueName = lines[index].replace(/,/g, '').replace(/\n/g, ''); 
+                const imageName = `clueImage_${clueName}`;
+
+                const blob = await new Promise(resolve => canvas.toBlob(resolve));
+
+                zip.file(`${imageName}.jpg`, blob);
+            }));
+
+            zip.generateAsync({ type: "blob" }).then(blob => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = 'clueImages.zip';
+                link.click();
+
+                document.getElementById('downloadStatus').textContent = 'ダウンロード完了';
+            });
+        }
+        //フォントファイルを読み込む
+        function loadFont() {
+            const fontInput = document.getElementById('fontInput');
+            const file = fontInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const font = new FontFace('CustomFont', e.target.result);
+                    font.load().then(function(loadedFont) {
+                        document.fonts.add(loadedFont);
+                        customFont = 'CustomFont';
+                        updateImages(); 
+                    });
+                };
+                reader.readAsArrayBuffer(file);
+            }
+        }
+
+    </script>
+</body>
+</html>
